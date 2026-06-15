@@ -168,6 +168,20 @@ Liveness probe → `{ "status": "ok" }`.
 - **`creators[].role`** covers interior credits plus cover artists and production roles. The same person may appear under multiple roles.
 - **`characters[].type`** is `Main`, `Supporting`, or `Cameo`; each character appears once, under its strongest billing.
 
+## Examples
+
+Ready-to-run consumers live in [`examples/`](examples/):
+
+| File                                   | Stack                                | Run                              |
+| -------------------------------------- | ------------------------------------ | -------------------------------- |
+| [`examples/fetch.js`](examples/fetch.js)   | Node 18+ (built-in `fetch`)      | `node examples/fetch.js marvel`  |
+| [`examples/client.py`](examples/client.py) | Python 3.10+ (stdlib `@dataclass`) | `python examples/client.py dc`   |
+| [`examples/types.ts`](examples/types.ts)   | TypeScript response types        | import into your project         |
+
+`client.py` and `types.ts` include typed models (`Comic`, `Variant`, `Creator`, `Character`, `Story`)
+mapping the response schema below — a useful starting point for your own client. See
+[`examples/README.md`](examples/README.md).
+
 ## Local development (without Docker)
 
 You still need a reachable FlareSolverr instance:
