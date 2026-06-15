@@ -1,0 +1,35 @@
+services:
+  comic-api:
+    build: .
+    container_name: comic-api
+    restart: unless-stopped
+    ports:
+      - "8070:8070"
+    environment:
+      - PORT=8070
+      # FlareSolverr solves Cloudflare's challenge for LOCG (datacenter IPs get
+      # 403'd otherwise). Reached by service name on the compose default network.
+      - FLARESOLVERR_URL=http://flaresolverr:8191
+      # Detail-page enrichment: cache each comic's scraped detail for this many
+      # hours (releases don't change after shipping) and limit concurrent detail
+      # fetches to stay gentle on FlareSolverr's single browser.
+      - DETAIL_TTL_HOURS=168
+      - DETAIL_CONCURRENCY=2
+    depends_on:
+      - flaresolverr
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8070/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - TZ=UTC
+    ports:
+      - "8191:8191"

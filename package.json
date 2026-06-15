@@ -1,0 +1,30 @@
+{
+  "name": "comic-api",
+  "version": "1.0.0",
+  "description": "Self-hosted Node.js/Express API that turns League of Comic Geeks weekly releases into enriched JSON (variants folded in, Cloudflare handled via FlareSolverr).",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "comics",
+    "league-of-comic-geeks",
+    "locg",
+    "marvel",
+    "dc",
+    "api",
+    "scraper",
+    "express",
+    "flaresolverr"
+  ],
+  "author": "Benedikt",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "express": "^4.21.0",
+    "node-fetch": "^2.7.0"
+  }
+}
