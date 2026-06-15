@@ -201,11 +201,15 @@ FLARESOLVERR_URL=http://localhost:8191 npm start
 
 Selectors live in `index.js` and may need updating if League of Comic Geeks changes its markup.
 
+## Used by
+
+- **[Percy](https://github.com/klappstuhlpy/Percy)** — a `discord.py` bot whose comic cog consumes this API to publish weekly Marvel/DC release feeds. It calls `GET /comics/{publisher}`, regroups the flat `creators` list into role→names, and renders each release as a Components V2 card with the cover, creators, characters, and a folded-in variant-cover gallery. A solid real-world reference for wiring a consumer to the schema above (see its `app/cogs/comic/` package).
+
 ## Acknowledgements
 
 - [League of Comic Geeks](https://leagueofcomicgeeks.com) — the upstream data source.
 - [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) — Cloudflare challenge solver.
-- [`alistairjcbrown/leagueofcomicgeeks`](https://github.com/alistairjcbrown/leagueofcomicgeeks) — prior-art Node library for LOCG that informed the list-parsing approach.
+- [`alistairjcbrown/leagueofcomicgeeks`](https://github.com/alistairjcbrown/leagueofcomicgeeks) — prior-art Node library for LOCG that informed the list-parsing approach. _Inspiration only — **not** a dependency; this project shares no code with it and runs independently._
 - Built with [Express](https://expressjs.com), [cheerio](https://cheerio.js.org), and [node-fetch](https://github.com/node-fetch/node-fetch).
 
 ## License
