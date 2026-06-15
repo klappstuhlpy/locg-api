@@ -1,4 +1,4 @@
-# comic-api
+# locg-api
 
 A small, self-hosted **Node.js / Express** service that turns [League of Comic Geeks](https://leagueofcomicgeeks.com) weekly release data into clean JSON.
 
@@ -16,7 +16,7 @@ This service wraps all of that behind a tiny REST API:
 
 ```
                                   ┌──────────────────────────────┐
-  GET /comics/marvel  ─────────▶  │  comic-api (Express)         │
+  GET /comics/marvel  ─────────▶  │  locg-api (Express)          │
                                   │   1. list  → get_comics       │
                                   │   2. group variants by parent │
                                   │   3. enrich each base comic   │
@@ -51,8 +51,8 @@ This service wraps all of that behind a tiny REST API:
 ## Quick start (Docker Compose)
 
 ```bash
-git clone <your-fork-url> comic-api
-cd comic-api
+git clone <your-fork-url> locg-api
+cd locg-api
 docker compose up -d --build
 ```
 
@@ -60,7 +60,7 @@ This starts two containers:
 
 | Service        | Port   | Purpose                                  |
 | -------------- | ------ | ---------------------------------------- |
-| `comic-api`    | `8070` | the REST API                             |
+| `locg-api`     | `8070` | the REST API                             |
 | `flaresolverr` | `8191` | headless browser that clears Cloudflare  |
 
 Verify it's up:

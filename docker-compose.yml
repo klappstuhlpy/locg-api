@@ -1,7 +1,7 @@
 services:
-  comic-api:
+  locg-api:
     build: .
-    container_name: comic-api
+    container_name: locg-api
     restart: unless-stopped
     ports:
       - "8070:8070"
