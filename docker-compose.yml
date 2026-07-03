@@ -10,6 +10,9 @@ services:
       # FlareSolverr solves Cloudflare's challenge for LOCG (datacenter IPs get
       # 403'd otherwise). Reached by service name on the compose default network.
       - FLARESOLVERR_URL=http://flaresolverr:8191
+      # Optional: route FlareSolverr's egress through a clean/residential proxy
+      # when LOCG serves this IP a 200 "Restricted" page. Set in the host env.
+      - FLARESOLVERR_PROXY=${FLARESOLVERR_PROXY:-}
       # Detail-page enrichment: cache each comic's scraped detail for this many
       # hours (releases don't change after shipping) and limit concurrent detail
       # fetches to stay gentle on FlareSolverr's single browser.

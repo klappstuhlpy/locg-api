@@ -81,6 +81,7 @@ All configuration is via environment variables (see [`.env.example`](.env.exampl
 | `PORT`               | `8070`                     | Port the API listens on.                                           |
 | `FLARESOLVERR_URL`   | `http://flaresolverr:8191` | Base URL of the FlareSolverr instance.                             |
 | `FLARESOLVERR_TIMEOUT` | `60000`                  | Per-request FlareSolverr timeout (ms).                             |
+| `FLARESOLVERR_PROXY`   | _(unset)_                  | Optional proxy for FlareSolverr's egress (`http://user:pass@host:port`). LOCG serves a `200` "Restricted" page to flagged datacenter IPs even after Cloudflare is cleared — route through a clean/residential IP to bypass it. |
 | `DETAIL_TTL_HOURS`   | `168`                      | How long to cache a comic's scraped detail (hours). `168` = 7 days. |
 | `DETAIL_CONCURRENCY` | `2`                        | Max detail pages scraped in parallel.                              |
 

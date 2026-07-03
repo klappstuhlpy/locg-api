@@ -7,6 +7,10 @@ const PORT = process.env.PORT || 8070;
 const ROOT_URL = "https://leagueofcomicgeeks.com";
 const FLARESOLVERR_URL = process.env.FLARESOLVERR_URL || "http://flaresolverr:8191";
 const FLARESOLVERR_TIMEOUT = parseInt(process.env.FLARESOLVERR_TIMEOUT, 10) || 60000;
+// LOCG serves a 200 "Restricted" page to flagged datacenter IPs even after
+// Cloudflare is cleared. Point FlareSolverr at a clean (e.g. residential) proxy
+// to egress from an unlisted IP. Optional: unset means direct egress.
+const FLARESOLVERR_PROXY = (process.env.FLARESOLVERR_PROXY || "").trim();
 
 // Detail pages are scraped per base comic, which is the expensive part. Releases
 // don't change after they ship, so cache each comic's enrichment for a week and
@@ -21,6 +25,19 @@ const PUBLISHERS = {
 
 // id -> { data, expires }
 const detailCache = new Map();
+
+// Errors carry an HTTP status + machine-readable code so every handler can
+// answer JSON (never HTML) and the consumer can branch on the failure class.
+// We deliberately avoid 502/504: Cloudflare replaces those origin statuses with
+// its own HTML error page, which would defeat the point. 503 = "retry later".
+class ApiError extends Error {
+  constructor(message, { status = 503, code = "upstream_error" } = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
 
 function formatDate(date) {
   const d = date || new Date();
@@ -272,32 +289,63 @@ function parseDetail(html) {
 // ── FlareSolverr + orchestration ─────────────────────────────────────────────
 
 async function solveGet(url) {
+  const command = { cmd: "request.get", url, maxTimeout: FLARESOLVERR_TIMEOUT };
+  if (FLARESOLVERR_PROXY) command.proxy = { url: FLARESOLVERR_PROXY };
+
   let response;
   try {
     response = await fetch(`${FLARESOLVERR_URL}/v1`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cmd: "request.get", url, maxTimeout: FLARESOLVERR_TIMEOUT }),
+      body: JSON.stringify(command),
     });
   } catch (err) {
-    throw new Error(`Cannot reach FlareSolverr at ${FLARESOLVERR_URL}: ${err.message}`);
+    throw new ApiError(`Cannot reach FlareSolverr at ${FLARESOLVERR_URL}: ${err.message}`, {
+      code: "flaresolverr_unreachable",
+    });
   }
 
   if (!response.ok) {
-    throw new Error(`FlareSolverr returned ${response.status}`);
+    throw new ApiError(`FlareSolverr returned ${response.status}`, { code: "flaresolverr_error" });
   }
 
   const payload = await response.json();
   if (payload.status !== "ok" || !payload.solution) {
-    throw new Error(`FlareSolverr failed: ${payload.message || "unknown error"}`);
+    throw new ApiError(`FlareSolverr failed: ${payload.message || "unknown error"}`, {
+      code: "flaresolverr_error",
+    });
   }
 
   const upstreamStatus = payload.solution.status;
   if (upstreamStatus >= 400) {
-    throw new Error(`LOCG returned ${upstreamStatus}`);
+    throw new ApiError(`LOCG returned ${upstreamStatus}`, { code: "upstream_status" });
   }
 
   return payload.solution.response || "";
+}
+
+// A block page means FlareSolverr handed the response back without a usable
+// body — these come back HTTP 200, so solveGet's status check misses them and
+// we only notice when the "JSON" won't parse. Two distinct sources:
+//   * Cloudflare — the challenge wasn't cleared (edge-level).
+//   * LOCG itself — serves a 200 "Restricted" page to flagged IPs, *after*
+//     Cloudflare is cleared. This is IP reputation, not a challenge; the fix is
+//     a clean egress IP (see FLARESOLVERR_PROXY), not a FlareSolverr retry.
+function upstreamBlockReason(html) {
+  const h = (html || "").toLowerCase();
+  if (/<title>\s*restricted\s*<\/title>|>\s*restricted\s*</.test(h)) {
+    return "LOCG 'Restricted' page — Cloudflare was cleared but LOCG blocked this egress IP (set FLARESOLVERR_PROXY to a clean IP)";
+  }
+  if (/just a moment|challenge-platform|cf_chl|cf-chl|_cf_chl_opt/.test(h)) {
+    return "Cloudflare challenge page (FlareSolverr did not clear the challenge)";
+  }
+  if (/attention required|sorry, you have been blocked|cf-error-details/.test(h)) {
+    return "Cloudflare block page (IP/challenge rejected)";
+  }
+  if (/enable javascript and cookies to continue/.test(h)) {
+    return "Cloudflare interstitial (JS/cookie gate not passed)";
+  }
+  return null;
 }
 
 // FlareSolverr returns the page as rendered in a browser, so a JSON endpoint
@@ -320,7 +368,18 @@ function parseSolvedJson(html) {
     return JSON.parse(match[0]);
   }
 
-  throw new Error("Could not parse JSON from FlareSolverr response");
+  // Nothing JSON-shaped came back. Surface *why* so the logs are diagnosable
+  // instead of a bare "could not parse": name the Cloudflare failure if we can
+  // recognise it, and always include a snippet of what FlareSolverr returned.
+  const reason = upstreamBlockReason(trimmed);
+  const snippet = clean(text || trimmed).slice(0, 200);
+  throw reason
+    ? new ApiError(`FlareSolverr returned a ${reason}. First 200 chars: ${snippet}`, {
+        code: "upstream_blocked",
+      })
+    : new ApiError(`Could not parse JSON from FlareSolverr response. First 200 chars: ${snippet}`, {
+        code: "unparseable_response",
+      });
 }
 
 // Run an async mapper over items with a bounded number of in-flight tasks.
@@ -373,7 +432,7 @@ async function fetchComics(date, publisherIds, { details = true } = {}) {
   const data = parseSolvedJson(await solveGet(url));
 
   if (!data || typeof data.list !== "string") {
-    throw new Error("Unexpected response format from LOCG");
+    throw new ApiError("Unexpected response format from LOCG", { code: "unexpected_format" });
   }
 
   const comics = parseReleases(data.list);
@@ -400,6 +459,15 @@ function resolvePublishers(param) {
   return ids;
 }
 
+// Always answer JSON. ApiError carries a status/code; anything else is an
+// unexpected bug → 500. Never let Express fall back to its HTML error page.
+function sendError(res, err, context) {
+  const status = err instanceof ApiError ? err.status : 500;
+  const code = err instanceof ApiError ? err.code : "internal_error";
+  console.error(`${context}: ${err.message}`);
+  res.status(status).json({ error: err.message, code });
+}
+
 // GET /comics/new?date=2026-06-18&publisher=marvel,dc&details=true
 app.get("/comics/new", async (req, res) => {
   try {
@@ -407,8 +475,7 @@ app.get("/comics/new", async (req, res) => {
     const comics = await fetchComics(date, resolvePublishers(req.query.publisher), { details: wantsDetails(req) });
     res.json({ date, count: comics.length, comics });
   } catch (err) {
-    console.error("Error fetching comics:", err.message);
-    res.status(502).json({ error: err.message });
+    sendError(res, err, "Error fetching comics");
   }
 });
 
@@ -419,8 +486,7 @@ app.get("/comics/marvel", async (req, res) => {
     const comics = await fetchComics(date, [PUBLISHERS["Marvel Comics"]], { details: wantsDetails(req) });
     res.json({ date, count: comics.length, comics });
   } catch (err) {
-    console.error("Error fetching Marvel comics:", err.message);
-    res.status(502).json({ error: err.message });
+    sendError(res, err, "Error fetching Marvel comics");
   }
 });
 
@@ -431,14 +497,25 @@ app.get("/comics/dc", async (req, res) => {
     const comics = await fetchComics(date, [PUBLISHERS["DC Comics"]], { details: wantsDetails(req) });
     res.json({ date, count: comics.length, comics });
   } catch (err) {
-    console.error("Error fetching DC comics:", err.message);
-    res.status(502).json({ error: err.message });
+    sendError(res, err, "Error fetching DC comics");
   }
 });
 
 // GET /health
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
+});
+
+// Unknown route → JSON 404 (Express's default is an HTML "Cannot GET …").
+app.use((req, res) => {
+  res.status(404).json({ error: `Not found: ${req.method} ${req.path}`, code: "not_found" });
+});
+
+// Last-resort handler: anything thrown synchronously in routing/middleware
+// (e.g. a malformed URL) lands here as JSON instead of Express's HTML page.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  sendError(res, err, "Unhandled error");
 });
 
 app.listen(PORT, "0.0.0.0", () => {
