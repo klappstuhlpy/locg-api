@@ -31,6 +31,16 @@ services:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
     restart: unless-stopped
+    # Chrome crashes (and FlareSolverr answers HTTP 500) with Docker's default
+    # 64MB /dev/shm. Give the browser real shared memory.
+    shm_size: "1gb"
+    # Chrome's built-in async DNS resolver fails against Docker's embedded DNS
+    # (127.0.0.11), which surfaces as "net::ERR_NAME_NOT_RESOLVED" on every
+    # solve. Pin real resolvers. This container only ever dials public hosts,
+    # so losing embedded DNS (and thus service-name lookups) costs nothing.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       - LOG_LEVEL=info
       - TZ=UTC

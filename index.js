@@ -288,7 +288,25 @@ function parseDetail(html) {
 
 // ── FlareSolverr + orchestration ─────────────────────────────────────────────
 
-async function solveGet(url) {
+// FlareSolverr drives a single headless browser. Unbounded parallel calls (two
+// publisher endpoints hit back-to-back, each fanning out into detail fetches)
+// make it return HTTP 500 with no useful body. Gate *every* call through one
+// process-wide semaphore instead of relying on the per-request mapLimit bound.
+let inFlight = 0;
+const waiting = [];
+
+async function acquireSlot() {
+  if (inFlight >= DETAIL_CONCURRENCY) await new Promise((resolve) => waiting.push(resolve));
+  inFlight++;
+}
+
+function releaseSlot() {
+  inFlight--;
+  const next = waiting.shift();
+  if (next) next();
+}
+
+async function solveGetOnce(url) {
   const command = { cmd: "request.get", url, maxTimeout: FLARESOLVERR_TIMEOUT };
   if (FLARESOLVERR_PROXY) command.proxy = { url: FLARESOLVERR_PROXY };
 
@@ -305,15 +323,17 @@ async function solveGet(url) {
     });
   }
 
-  if (!response.ok) {
-    throw new ApiError(`FlareSolverr returned ${response.status}`, { code: "flaresolverr_error" });
-  }
+  // FlareSolverr answers JSON even on 5xx, and its `message` is the only thing
+  // that says *why* (challenge timeout, browser crash, proxy refused…). Read
+  // the body before branching on the status so that reason reaches the logs.
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) { /* non-JSON body — fall through to the status-only message */ }
 
-  const payload = await response.json();
-  if (payload.status !== "ok" || !payload.solution) {
-    throw new ApiError(`FlareSolverr failed: ${payload.message || "unknown error"}`, {
-      code: "flaresolverr_error",
-    });
+  if (!response.ok || !payload || payload.status !== "ok" || !payload.solution) {
+    const detail = (payload && payload.message) || `HTTP ${response.status} with no JSON body`;
+    throw new ApiError(`FlareSolverr failed: ${detail}`, { code: "flaresolverr_error" });
   }
 
   const upstreamStatus = payload.solution.status;
@@ -322,6 +342,15 @@ async function solveGet(url) {
   }
 
   return payload.solution.response || "";
+}
+
+async function solveGet(url) {
+  await acquireSlot();
+  try {
+    return await solveGetOnce(url);
+  } finally {
+    releaseSlot();
+  }
 }
 
 // A block page means FlareSolverr handed the response back without a usable
@@ -432,7 +461,12 @@ async function fetchComics(date, publisherIds, { details = true } = {}) {
   const data = parseSolvedJson(await solveGet(url));
 
   if (!data || typeof data.list !== "string") {
-    throw new ApiError("Unexpected response format from LOCG", { code: "unexpected_format" });
+    // Say what *did* come back — LOCG answers a JSON error/empty envelope in a
+    // few situations, and a bare "unexpected format" is undiagnosable.
+    const got = clean(JSON.stringify(data)).slice(0, 200);
+    throw new ApiError(`Unexpected response format from LOCG. Got: ${got}`, {
+      code: "unexpected_format",
+    });
   }
 
   const comics = parseReleases(data.list);
@@ -518,6 +552,10 @@ app.use((err, req, res, next) => {
   sendError(res, err, "Unhandled error");
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Comic API listening on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Comic API listening on port ${PORT}`);
+  });
+}
+
+module.exports = { app, acquireSlot, releaseSlot, DETAIL_CONCURRENCY };
