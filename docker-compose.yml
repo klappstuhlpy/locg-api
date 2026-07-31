@@ -3,12 +3,10 @@ services:
     build: .
     container_name: locg-api
     restart: unless-stopped
-    ports:
-      - "8070:8070"
     environment:
       - PORT=8070
       # FlareSolverr solves Cloudflare's challenge for LOCG (datacenter IPs get
-      # 403'd otherwise). Reached by service name on the compose default network.
+      # 403'd otherwise). Reached by service name on the homelab docker network.
       - FLARESOLVERR_URL=http://flaresolverr:8191
       # Optional: route FlareSolverr's egress through a clean/residential proxy
       # when LOCG serves this IP a 200 "Restricted" page. Set in the host env.
@@ -27,6 +25,15 @@ services:
       retries: 3
       start_period: 10s
 
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+    networks:
+      - homelab
+
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
@@ -44,5 +51,23 @@ services:
     environment:
       - LOG_LEVEL=info
       - TZ=UTC
-    ports:
-      - "8191:8191"
+
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8191/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1024M
+
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    external: true
